@@ -3,6 +3,7 @@ package banking;
 import org.sqlite.SQLiteDataSource;
 
 import java.sql.*;
+import java.util.HashSet;
 
 // This class handles all database operations and SQL queries
 public class AccountsDatabase {
@@ -11,13 +12,14 @@ public class AccountsDatabase {
     private final String defaultName = "accountsDatabase";
     private final Connection connection;
 
-    // This constructor
+    // Create a default database or connect to an existing one
     public AccountsDatabase () throws SQLException {
         String fullUrl = dbUrl + defaultName;
         SQLiteDataSource dataSource = new SQLiteDataSource();
         dataSource.setUrl(fullUrl);
         this.connection = dataSource.getConnection();
         createTable();
+        Card.setCardNumbersList(getAllCardNumbers());
     }
 
     private void createTable() {
@@ -32,16 +34,14 @@ public class AccountsDatabase {
                 statement.execute(createTable);
             }
         } catch (SQLException e) {
-            System.out.println("Table already exists");
+            System.out.println("Couldn't create a table in the database");
         }
     }
 
     public void addCard(Card card) {
-        try {
-            String cardInfo = "INSERT INTO card (id, number, pin, balance) " +
-                    "VALUES (?, ?, ?, ?);";
-//                    "VALUES (" + card.getId() + ", '" + card.getNumber() + "', '" + card.getPin() + "', " + card.getBalance() +");";
-            PreparedStatement preparedStatement = connection.prepareStatement(cardInfo);
+        String cardInfo = "INSERT INTO card (id, number, pin, balance) " +
+                "VALUES (?, ?, ?, ?);";
+        try (PreparedStatement preparedStatement = connection.prepareStatement(cardInfo)) {
             preparedStatement.setInt(1, card.getId());
             preparedStatement.setString(2, card.getNumber());
             preparedStatement.setString(3, card.getPin());
@@ -54,9 +54,9 @@ public class AccountsDatabase {
 
     public Card getCard(String cardNumber) {
         Card card = null;
-        try {
-            String selectCardSQL = "SELECT * FROM card WHERE number = ?";
-            PreparedStatement ps = connection.prepareStatement(selectCardSQL);
+        String selectCardSQL = "SELECT * FROM card WHERE number = ?";
+
+        try (PreparedStatement ps = connection.prepareStatement(selectCardSQL)) {
             ps.setString(1, cardNumber);
             ResultSet rs = ps.executeQuery();
             while (rs.next()) {
@@ -71,12 +71,27 @@ public class AccountsDatabase {
         return card;
     }
 
+    public HashSet<String> getAllCardNumbers() {
+        HashSet<String> allNumbers = new HashSet<>();
+        String allCardsSQL = "SELECT number FROM card";
+
+        try (Statement statement = connection.createStatement()) {
+            ResultSet resultSet = statement.executeQuery(allCardsSQL);
+            while (resultSet.next()) {
+                String cardNum = resultSet.getString("number");
+                allNumbers.add(cardNum);
+            }
+        } catch (SQLException e) {
+            System.out.println("Couldn't get allCards list");
+        }
+        return allNumbers;
+    }
+
     public int checkLastId() {
         int lastId = 0;
-        try {
-            Statement statement = connection.createStatement();
-            String checkIdSQL = "SELECT * FROM card " +
-                    "ORDER BY id DESC LIMIT 1;";
+        String checkIdSQL = "SELECT * FROM card " +
+                "ORDER BY id DESC LIMIT 1;";
+        try (Statement statement = connection.createStatement()) {
             ResultSet resultSet = statement.executeQuery(checkIdSQL);
             while (resultSet.next()) {
                 lastId = resultSet.getInt("id");
@@ -87,14 +102,16 @@ public class AccountsDatabase {
         return lastId;
     }
 
-    public int readBalance(Card card) throws SQLException {
-        Statement statement = connection.createStatement();
+    public double readBalance(Card card) {
+        double balance = 0;
         String checkBalanceSQL = "SELECT balance FROM card " +
-                "WHERE id = " + card.getId();
-        int balance = 0;
-        try (ResultSet resultSet = statement.executeQuery(checkBalanceSQL)) {
+                "WHERE id = ?";
+
+        try (PreparedStatement ps = connection.prepareStatement(checkBalanceSQL)) {
+            ps.setInt(1, card.getId());
+            ResultSet resultSet = ps.executeQuery();
             while (resultSet.next()) {
-                balance = resultSet.getInt("balance");
+                balance = resultSet.getDouble("balance");
             }
         } catch (SQLException e) {
             System.out.println("Something went wrong during reading a balance. Please try again.");
@@ -102,57 +119,15 @@ public class AccountsDatabase {
         return balance;
     }
 
-//    public int readBalance(String cardNum) throws SQLException {
-//        Statement statement = connection.createStatement();
-//        String checkBalanceSQL = "SELECT balance FROM card " +
-//                "WHERE number = " + cardNum + ";";
-//        int balance = 0;
-//        try (ResultSet resultSet = statement.executeQuery(checkBalanceSQL)) {
-//            while (resultSet.next()) {
-//                balance = resultSet.getInt("balance");
-//            }
-//        } catch (SQLException e) {
-//            System.out.println("Something went wrong during reading a balance. Please try again.");
-//        }
-//        return balance;
-//    }
-
-    public String readPin(String accountNumber) throws SQLException {
-        Statement statement = connection.createStatement();
-        String checkBalanceSQL = "SELECT pin FROM card " +
-                "WHERE number = " + accountNumber;
-        String pin = "";
-        try (ResultSet resultSet = statement.executeQuery(checkBalanceSQL)) {
-            while (resultSet.next()) {
-                pin = resultSet.getString("pin");
-            }
-        } catch (SQLException e) {
-            System.out.println("Something went wrong during reading a pin. Please try again.");
-        }
-        return pin;
-    }
-
-    public int readId(String accountNumber) throws SQLException {
-        Statement statement = connection.createStatement();
-        String checkBalanceSQL = "SELECT id FROM card " +
-                "WHERE number = " + accountNumber;
-        int id = 0;
-        try (ResultSet resultSet = statement.executeQuery(checkBalanceSQL)) {
-            while (resultSet.next()) {
-                id = resultSet.getInt("id");
-            }
-        } catch (SQLException e) {
-            System.out.println("Something went wrong during reading a pin. Please try again.");
-        }
-        return id;
-    }
-
-    public void updateBalance(Card card, int newBalance) {
+    public void updateBalance(Card card) {
         String addBalanceSQL = "UPDATE card " +
-                "SET balance = " + newBalance + " " +
-                "WHERE id = " + card.getId() + ";";
-        try (Statement statement = connection.createStatement()) {
-            statement.executeUpdate(addBalanceSQL);
+                "SET balance = ?" +
+                "WHERE id = ?";
+
+        try (PreparedStatement ps = connection.prepareStatement(addBalanceSQL)) {
+            ps.setDouble(1, card.getBalance());
+            ps.setInt(2, card.getId());
+            ps.executeUpdate();
         } catch (SQLException e) {
             System.out.println("Something went wrong during adding balance");
         }
@@ -160,9 +135,11 @@ public class AccountsDatabase {
 
     public void deleteAccount(Card card) {
         String deleteAccountSQL = "DELETE FROM card " +
-                "WHERE id = " + card.getId() + ";";
-        try (Statement statement = connection.createStatement()) {
-            statement.executeUpdate(deleteAccountSQL);
+                "WHERE id = ?";
+
+        try (PreparedStatement ps = connection.prepareStatement(deleteAccountSQL)) {
+            ps.setInt(1, card.getId());
+            ps.executeUpdate();
             System.out.println("\nThe account has been closed!");
         } catch (SQLException e) {
             System.out.println("Something went wrong during closing the account.");
@@ -170,14 +147,15 @@ public class AccountsDatabase {
     }
 
     // returns true if card exists in the database
-    public boolean containsCard(String cardNumber) throws SQLException {
+    public boolean containsCard(String cardNumber) {
         boolean cardExists = true;
-        Statement statement = connection.createStatement();
-
         // Check if there are any results of the query
         String checkCardSQL = "SELECT * FROM card " +
-                "WHERE number = " + cardNumber;
-        try (ResultSet resultSet = statement.executeQuery(checkCardSQL)) {
+                "WHERE number = ?";
+
+        try (PreparedStatement ps = connection.prepareStatement(checkCardSQL)) {
+            ps.setString(1, cardNumber);
+            ResultSet resultSet = ps.executeQuery();
             cardExists = resultSet.next();
         } catch (SQLException e) {
             System.out.println("We couldn't find this account number. Please try again.");
@@ -185,20 +163,21 @@ public class AccountsDatabase {
         return cardExists;
     }
 
-    public void doTransfer(Card card, String receiversCardNumber, int amount) {
+    public void sendTransfer(Card card, String receiversCardNumber, double amount) {
         String deductBalanceSQL = "UPDATE card SET balance = balance - ?" +
                 "WHERE id = ?";
         String addBalanceSQL = "UPDATE card SET balance = balance + ?" +
                 "WHERE number = ?";
+
         try (PreparedStatement ps1 = connection.prepareStatement(deductBalanceSQL);
              PreparedStatement ps2 = connection.prepareStatement(addBalanceSQL)) {
-
-            ps1.setInt(1, amount);
+            ps1.setDouble(1, amount);
             ps1.setInt(2, card.getId());
             ps1.executeUpdate();
-            ps2.setInt(1, amount);
+            ps2.setDouble(1, amount);
             ps2.setString(2, receiversCardNumber);
             ps2.executeUpdate();
+            System.out.println("\nTransfer completed successfully!");
         } catch (SQLException e) {
             System.out.println("Something went wrong during a transfer");
         }

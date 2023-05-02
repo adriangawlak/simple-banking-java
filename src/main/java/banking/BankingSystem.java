@@ -1,16 +1,14 @@
 package banking;
 
 import java.sql.SQLException;
-import java.util.HashMap;
 import java.util.InputMismatchException;
 import java.util.Scanner;
 
 public class BankingSystem {
 
     private Scanner scan = new Scanner(System.in);
-//    public static HashMap<String, Card> listOfCards = new HashMap<>();
     private boolean programOn;
-    AccountsDatabase database;
+    private AccountsDatabase database;
 
     public BankingSystem() throws SQLException {
             database = new AccountsDatabase();
@@ -32,8 +30,8 @@ public class BankingSystem {
                     createAccount();
                     break;
                 case 2:
-                    int result = logIntoAccount();
-                    if (result == 1) {
+                    int error = logIntoAccount();
+                    if (error == 1) {
                         programOn = false;
                         closeApplication();
                     }
@@ -59,8 +57,8 @@ public class BankingSystem {
         Card card = new Card(database.checkLastId());
         database.addCard(card);
         System.out.println("\nYour card has been created");
-        System.out.println("Your card number:");
-        System.out.println(card.getNumber());
+        System.out.println("\nYour card number:");
+        printAccountNumber(card.getNumber());
         System.out.println("Your card PIN:");
         System.out.println(card.getPin());
     }
@@ -68,24 +66,19 @@ public class BankingSystem {
     public int logIntoAccount() throws SQLException {
         System.out.println("Enter your card number:");
         System.out.print("> ");
-        String cardNumber = scan.next();
+        scan.nextLine();
+        String inputCardNumber = scan.nextLine().trim().replaceAll("\\s", "");
 
         System.out.println("Enter your PIN:");
         System.out.print("> ");
-        String inputPin = scan.next();
+        String inputPin = scan.nextLine().trim().replaceAll("\\s", "");
 
-//        if (listOfCards.containsKey(cardNumber)) {
-        if (database.containsCard(cardNumber)) {
-            Card card = database.getCard(cardNumber);
-//            Card card = listOfCards.get(cardNumber);
-//            int id = database.readId(cardNumber);
-//            int balance = database.readBalance(cardNumber);
-//            String pin = database.readPin(cardNumber);
-//            Card card = new Card(id, cardNumber, pin, balance);
+        if (database.containsCard(inputCardNumber)) {
+            Card card = database.getCard(inputCardNumber);
 
             if (card != null && card.getPin().equals(inputPin)) {
                 System.out.println("\nYou have successfully logged in!");
-                showAccountMenu(card); // -> create cardView
+                showAccountMenu(card); // moves to card view
                 return 0;
             }
         } else {
@@ -110,8 +103,7 @@ public class BankingSystem {
 
             switch (choice) {
                 case 1:
-//                    System.out.println("\nBalance: " + card.getBalance());
-                    System.out.println("\nBalance: " + database.readBalance(card));
+                    System.out.println("\nBalance: " + card.getBalance());
                     break;
                 case 2:
                     addBalance(card);
@@ -127,56 +119,55 @@ public class BankingSystem {
                     System.out.println("\nYou have successfully logged out!");
                     loggedIn = false;
                     break;
-//                case 6:
-//                    System.out.println(database.checkLastId());
                 case 0:
                     loggedIn = false;
                     programOn = false;
                     System.out.println("\nBye!");
                     closeApplication();
                     break;
+                default:
+                    System.out.println("Please type the correct number and press Enter");
             }
         }
     }
 
-    public void addBalance(Card card) throws SQLException {
+    public void addBalance(Card card) {
         System.out.println("Enter income amount:");
-        System.out.print(">");
-        int currentBalance = database.readBalance(card);
-        int amountToAdd = scan.nextInt();
-        int newBalance = currentBalance + amountToAdd;
-        database.updateBalance(card, newBalance);
+        System.out.print("> ");
+        double amountToAdd = scanDouble();
+        // update card and database
+        card.setBalance(card.getBalance() + amountToAdd);
+        database.updateBalance(card);
         System.out.println("\nIncome was added!");
     }
 
-    public void doTransfer(Card card) throws SQLException {
-        System.out.println("Transfer");
-        System.out.println("Enter card number:");
-        System.out.print(">");
+    public void doTransfer(Card card) {
+        System.out.println("\nEnter receivers card number:");
+        System.out.print("> ");
         scan.nextLine();
-        String receiversAccount = scan.nextLine();
+        String receiversCard = scan.nextLine().trim().replaceAll("\\s", "");
 
-        int properChecksum = Card.generateChecksum(receiversAccount.substring(0, 15));
-        int givenChecksum = Integer.parseInt(receiversAccount.substring(15));
-//        System.out.println("Proper checksum is " + properChecksum);
+        // Check if given number is a correct card number
+        if (!CardValidator.isCardNumber(receiversCard)) {
+            return;
 
-        // check if receivers card number is correct
-        if (properChecksum != givenChecksum) {
-            System.out.println("Probably you made a mistake in the card number. Please try again!");
-        } else if (database.containsCard(receiversAccount) == false) {
-            System.out.println("Such a card does not exist.");
-        } else if (card.getNumber().equals(receiversAccount)) {
+        } else if (!database.containsCard(receiversCard)) {
+            System.out.println("This card does not exist.");
+
+        } else if (card.getNumber().equals(receiversCard)) {
             System.out.println("You can't transfer money to the same account!");
+        // Proceed with the transfer
         } else {
-            System.out.println("Enter how much money you want to transfer:");
-            System.out.print(">");
-            int amount = scan.nextInt();
-            if (amount > database.readBalance(card)){
+            System.out.println("Enter the amount to transfer:");
+            System.out.print("> ");
+            double amount = scanDouble();
+            if (amount > database.readBalance(card)) {
                 System.out.println("Not enough money!");
-            } else
-                database.doTransfer(card, receiversAccount, amount);
+            } else {
+                card.setBalance(card.getBalance() - amount);
+                database.sendTransfer(card, receiversCard, amount);
+            }
         }
-
     }
 
     public int scanNumber() {
@@ -194,19 +185,28 @@ public class BankingSystem {
         return choice;
     }
 
-    public long scanNumber(boolean isLong) {
-        long choice = 0;
+    public double scanDouble() {
+        double input = 0.0;
         boolean validInput = false;
         while (!validInput) {
             try {
-                choice = scan.nextLong();
+                input = scan.nextDouble();
                 validInput = true;
             } catch (InputMismatchException e) {
-                System.out.println("Invalid input, please enter a correct number");
+                System.out.println("Invalid input, please enter a correct number.");
                 scan.next();
             }
         }
-        return choice;
+        return Math.round(input * 100.0) / 100.0;
+    }
+
+    private void printAccountNumber(String number) {
+        StringBuilder formattedNumber = new StringBuilder();
+        for (int i = 0; i < number.length(); i+=4) {
+                formattedNumber.append(number.substring(i, i + 4));
+                formattedNumber.append(" ");
+        }
+        System.out.println(formattedNumber);
     }
 
 }
